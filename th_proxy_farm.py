@@ -31,7 +31,6 @@ FREE_MODEL = "deepseek-v4-flash:free"
 # Daftar proxy (Http/Https/Socks).
 # Contoh format: "http://user:pass@ip:port" atau "http://ip:port"
 PROXIES = [
-    "https://brd-customer-hl_af7d432a-zone-center:m1gbtzpn457t@brd.superproxy.io:44445",
     "https://user-W7nj1LLKsgjG6sUt-type-residential-country-SG:LlOdH9jcC5rQ9tIQ@geo.g-w.info:10443"
 ]
 
@@ -78,45 +77,27 @@ def new_session(proxy=None):
 
 def tm_inbox():
     d = requests.post("https://api.tempmail.lol/v2/inbox/create", timeout=20).json()
-    addr, tok = d.get("address") or "", d.get("token") or ""
-    if not addr or not tok:
-        return None
-    return "tll", addr, tok
+    return "tll", d["address"], d["token"]
 
 
 def mtm_inbox():
-    try:
-        djson = requests.get("https://api.mail.tm/domains", timeout=20).json()
-        mem = djson.get("hydra:member") or []
-        dom = mem[0].get("domain") or "" if mem else ""
-        if not dom:
-            return None
-        addr = "t" + ''.join(random.choices(string.ascii_lowercase + string.digits, k=10)) + "@" + dom
-        pwd = "Mail" + ''.join(random.choices(string.ascii_letters + string.digits, k=10)) + "!9"
-        requests.post("https://api.mail.tm/accounts",
-                      json={"address": addr, "password": pwd}, timeout=20)
-        r = requests.post("https://api.mail.tm/token",
-                          json={"address": addr, "password": pwd}, timeout=20)
-        tok = (r.json().get("token") or "") if r else ""
-        if not addr or not tok:
-            return None
-        return "mtm", addr, tok
-    except Exception:
-        return None
+    dom = requests.get("https://api.mail.tm/domains", timeout=20).json()["hydra:member"][0]["domain"]
+    addr = "t" + ''.join(random.choices(string.ascii_lowercase + string.digits, k=10)) + "@" + dom
+    pwd = "Mail" + ''.join(random.choices(string.ascii_letters + string.digits, k=10)) + "!9"
+    requests.post("https://api.mail.tm/accounts", json={"address": addr, "password": pwd}, timeout=20)
+    tok = requests.post("https://api.mail.tm/token",
+                        json={"address": addr, "password": pwd}, timeout=20).json()["token"]
+    return "mtm", addr, tok
 
 
 INBOX = {"tll": tm_inbox, "mtm": mtm_inbox}
 
 
 def get_inbox(kind="tll"):
-    for k in ([kind] + [k2 for k2 in INBOX if k2 != kind]):
-        try:
-            out = INBOX[k]()
-            if out:
-                return out
-        except Exception:
-            continue
-    return None
+    try:
+        return INBOX[kind]()
+    except Exception:
+        return INBOX["mtm" if kind == "tll" else "tll"]()
 
 
 def poll_verify(kind, token, timeout=180):
@@ -185,54 +166,6 @@ def log_rec(rec):
         f.write(json.dumps(rec) + "\n")
 
 
-# ─────────────────────────── signup: precheck + token ───────────────────────────
-
-def signup_err(text):
-    for m in re.finditer(r'\d+:\s*\{\s*"error"\s*:\s*"([^"]+)"', text):
-        v = m.group(1)
-        if v and not v.startswith("$"):
-            return v
-    m = re.search(r'"error"\s*:\s*"([^"]+)"', text)
-    return m.group(1) if m else ""
-
-
-def precheck(s):
-    """GET /api/auth/signup-precheck?fp=<uuid> -> (needCaptcha bool, fp str, raw dict)."""
-    fp = str(uuid.uuid4())
-    try:
-        r = s.get(f"{API}/api/auth/signup-precheck?fp={fp}", timeout=25)
-        j = r.json() if r.status_code == 200 else {}
-        need = bool(j.get("needCaptcha"))
-        return need, fp, j
-    except Exception:
-        # precheck gagal -> asumsikan butuh token (aman) biar gak salah skip
-        return True, fp, {}
-
-
-def get_turnstile_token(timeout=45, headless=True):
-    """Ambil token Turnstile lewat Camoufox (kalau tersedia). None = tidak bisa."""
-    try:
-        from camoufox.async_api import AsyncCamoufox
-    except Exception:
-        return None
-    import asyncio
-    READ = ('() => document.querySelector("[name=\\"cf-turnstile-response\\"]")'
-            '?.value || ""')
-    async def _run():
-        async with AsyncCamoufox(headless=headless) as b:
-            page = await b.new_page()
-            await page.goto(f"{API}/login?mode=signup", wait_until="networkidle",
-                            timeout=60000)
-            t0 = time.time()
-            while time.time() - t0 < timeout - 40:
-                v = await page.evaluate(READ)
-                if v and len(v) > 20:
-                    return v
-                await asyncio.sleep(0.5)
-            return None
-    return asyncio.run(_run())
-
-
 # ─────────────────────────── core flow ───────────────────────────
 
 def farm(idx, proxy, verbose=True):
@@ -249,12 +182,7 @@ def farm(idx, proxy, verbose=True):
             return rec
         if verbose: print(f"  [{idx}] exit IP: {rec['ip']}", flush=True)
 
-        inbox = get_inbox("tll")
-        if not inbox:
-            rec["error"] = "inbox_unavailable"
-            if verbose: print(f"  [{idx}] semua provider inbox gagal, skip", flush=True)
-            return rec
-        kind, email, mtok = inbox
+        kind, email, mtok = get_inbox("tll")
         pwd = newpass()
         rec["email"], rec["password"] = email, pwd
         if verbose: print(f"  [{idx}] email: {email}", flush=True)
@@ -288,32 +216,22 @@ def farm(idx, proxy, verbose=True):
         action_id = act.group(1) if act and act.groups() else (act.group(0) if act else "")
         time.sleep(2)
 
-        # 2) signup via server action — precheck dulu, token kalau perlu
-        need, fp, pj = precheck(s)
-        if verbose:
-            print(f"  [{idx}] precheck needCaptcha={need}" + (f" ({pj.get('error','')})" if not need and pj.get('error') else ""), flush=True)
-
-        def build_and_post(token=None):
-            nb = "----WebKitFormBoundary" + uuid.uuid4().hex[:16]
-            fields = ["1_$ACTION_REF_1", "", "1_$ACTION_1:0", json.dumps({"id": action_id, "bound": "$@1"}),
-                      "1_$ACTION_1:1", '["$undefined"]', "1_$ACTION_KEY", uuid.uuid4().hex,
-                      "1_device_fingerprint", fp, "1_timezone", "Asia/Jakarta",
-                      "1_next", "", "1_email", email, "1_password", pwd, "0", '["$undefined","$K1"]']
-            if token:
-                fields += ["1_cf-turnstile-response", token,
-                           "cf-turnstile-response", token]
-            parts = []
-            for i in range(0, len(fields), 2):
-                parts += [f"--{nb}", f'Content-Disposition: form-data; name="{fields[i]}"', "", fields[i + 1]]
-            body = "\r\n".join(parts) + f"\r\n--{nb}--\r\n"
-            return s.post(f"{API}/login?mode=signup",
-                          headers={"Content-Type": f"multipart/form-data; boundary={nb}",
-                                   "Next-Action": action_id, "X-Deployment-Id": deploy_id,
-                                   "Accept": "text/x-component", "Origin": API,
-                                   "Referer": f"{API}/login?mode=signup"},
-                          data=body.encode(), timeout=45, allow_redirects=False)
-
-        r = build_and_post()
+        # 2) signup via server action
+        b = "----WebKitFormBoundary" + uuid.uuid4().hex[:16]
+        fields = ["1_$ACTION_REF_1", "", "1_$ACTION_1:0", json.dumps({"id": action_id, "bound": "$@1"}),
+                  "1_$ACTION_1:1", '["$undefined"]', "1_$ACTION_KEY", uuid.uuid4().hex,
+                  "1_device_fingerprint", str(uuid.uuid4()), "1_timezone", "Asia/Jakarta",
+                  "1_next", "", "1_email", email, "1_password", pwd, "0", '["$undefined","$K1"]']
+        parts = []
+        for i in range(0, len(fields), 2):
+            parts += [f"--{b}", f'Content-Disposition: form-data; name="{fields[i]}"', "", fields[i + 1]]
+        body = "\r\n".join(parts) + f"\r\n--{b}--\r\n"
+        r = s.post(f"{API}/login?mode=signup",
+                   headers={"Content-Type": f"multipart/form-data; boundary={b}",
+                            "Next-Action": action_id, "X-Deployment-Id": deploy_id,
+                            "Accept": "text/x-component", "Origin": API,
+                            "Referer": f"{API}/login?mode=signup"},
+                   data=body.encode(), timeout=45, allow_redirects=False)
         for attempt in range(6):
             if r.status_code not in (502, 503, 504):
                 break
@@ -325,35 +243,33 @@ def farm(idx, proxy, verbose=True):
             if verbose: print(f"  [{idx}] exit {r.status_code}, ganti IP ({attempt+1}/5)...", flush=True)
             time.sleep(2)
             try:
-                r = build_and_post()
+                r = s.post(f"{API}/login?mode=signup",
+                           headers={"Content-Type": f"multipart/form-data; boundary={b}",
+                                    "Next-Action": action_id, "X-Deployment-Id": deploy_id,
+                                    "Accept": "text/x-component", "Origin": API,
+                                    "Referer": f"{API}/login?mode=signup"},
+                           data=body.encode(), timeout=45, allow_redirects=False)
             except requests.RequestException as e:
                 if verbose: print(f"  [{idx}] POST gagal ({type(e).__name__}), coba IP lain...", flush=True)
-
         low = r.text.lower()
-        reason = signup_err(r.text)
-        # kalau precheck bilang butuh captcha, atau pertama kali jawab needCaptcha -> ambil token & kirim ulang sekali
-        if (need or "needcaptcha" in (reason or "").lower() or
-                "human check" in (reason or "").lower()):
-            if r.status_code == 303:
-                pass  # sudah sukses walau precheck bilang butuh — beres
-            else:
-                tok = get_turnstile_token()
-                if tok:
-                    if verbose: print(f"  [{idx}] token captcha ({len(tok)} chars), kirim ulang...", flush=True)
-                    r = build_and_post(token=tok)
-                    reason = signup_err(r.text)
-                    low = r.text.lower()
-                elif verbose:
-                    print(f"  [{idx}] butuh token captcha tapi Camoufox/venv tidak tersedia — skip", flush=True)
-        if "many sign-ups" in low or "take a breath" in low:
+        # Body 200 dari Next.js server action bawa alasan asli; jangan tebak dari status code.
+        def signup_err():
+            for m in re.finditer(r'\d+:\s*\{\s*"error"\s*:\s*"([^"]+)"', r.text):
+                v = m.group(1)
+                if v and not v.startswith("$"):
+                    return v
+            m = re.search(r'"error"\s*:\s*"([^"]+)"', r.text)
+            return m.group(1) if m else ""
+        reason = signup_err()
+        if "many sign-ups" in low:
             rec["error"] = "NETWORK_RATE_LIMIT"; print(f"  [{idx}] rate limit IP", flush=True); return rec
         if "team has been alerted" in low or "couldn't create" in low:
             rec["error"] = "DOMAIN_REJECTED_OR_IP_BAD"; print(f"  [{idx}] domain/IP ditolak: {reason[:100]}", flush=True); return rec
         lowv = (reason or "").lower()
         if r.status_code != 303:
             if "needcaptcha" in lowv or "human check" in lowv or "captcha" in lowv:
-                rec["error"] = f"NEED_CAPTCHA ({r.status_code})"
-                print(f"  [{idx}] butuh token captcha (IP AMAN, {r.status_code}) {reason[:100]}", flush=True); return rec
+                rec["error"] = f"NEED_CAPTCHA ({r.status_code})"; 
+                print(f"  [{idx}] butuh token captcha — IP AMAN ({r.status_code}) {reason[:100]}", flush=True); return rec
             rec["error"] = f"signup_{r.status_code}_other"
             print(f"  [{idx}] respons {r.status_code}: {reason or '(kosong)'[:120]}", flush=True); return rec
         if verbose: print(f"  [{idx}] signup OK (303)", flush=True)
@@ -519,7 +435,7 @@ def main():
     if not interactive:
         print(f"TokenHarbor Farm | {n} akun ({mode.upper()})" +
               (f" x{args.workers} workers" if args.workers > 1 else ""))
-        ok = run_batch(n, proxies=proxies, workers=args.workers)
+        ok = run_batch(n, proxies=proxies)
         print(f"\n=== {ok}/{n} live -> {OUT_KEYS} ===")
         return
 
