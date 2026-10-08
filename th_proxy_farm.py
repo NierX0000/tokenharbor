@@ -519,7 +519,7 @@ def main():
     if not interactive:
         print(f"TokenHarbor Farm | {n} akun ({mode.upper()})" +
               (f" x{args.workers} workers" if args.workers > 1 else ""))
-        ok = run_batch(n, proxies=proxies)
+        ok = run_batch(n, proxies=proxies, workers=args.workers)
         print(f"\n=== {ok}/{n} live -> {OUT_KEYS} ===")
         return
 
