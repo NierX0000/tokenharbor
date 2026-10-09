@@ -31,6 +31,16 @@ FREE_MODEL = "deepseek-v4-flash:free"
 # Daftar proxy (Http/Https/Socks).
 # Contoh format: "http://user:pass@ip:port" atau "http://ip:port"
 PROXIES = [
+    "https://brd-customer-hl_af7d432a-zone-center:m1gbtzpn457t@brd.superproxy.io:44445",
+    "https://brd-customer-hl_af7d432a-zone-center_2:969o1rrbj03k@brd.superproxy.io:44445",
+    "https://brd-customer-hl_af7d432a-zone-center_3:yjiq0sh9d1ot@brd.superproxy.io:44445",
+    "https://brd-customer-hl_af7d432a-zone-center_4:0es0gdb9hb8f@brd.superproxy.io:44445",
+    "https://brd-customer-hl_af7d432a-zone-center_5:nz6l17pq8s4v@brd.superproxy.io:44445",
+    "https://brd-customer-hl_af7d432a-zone-center_6:e1q05ofey52b@brd.superproxy.io:44445",
+    "https://brd-customer-hl_af7d432a-zone-center_7:4c7d36mc1hqx@brd.superproxy.io:44445",
+    "https://brd-customer-hl_af7d432a-zone-center_8:nki82400m04f@brd.superproxy.io:44445",
+    "https://brd-customer-hl_af7d432a-zone-center_9:7zpdwheryxt1@brd.superproxy.io:44445",
+    "https://brd-customer-hl_af7d432a-zone-center_10:u4by25wp3vw0@brd.superproxy.io:44445",
     "https://user-W7nj1LLKsgjG6sUt-type-residential-country-SG:LlOdH9jcC5rQ9tIQ@geo.g-w.info:10443"
 ]
 
